@@ -33,7 +33,7 @@ class Net(nn.Module):
         return x
 
 
-coords_labels_np = np.loadtxt("../coords_labels.txt").astype(np.float32)
+coords_labels_np = np.loadtxt("../data/coords_labels.txt").astype(np.float32)
 # normalization
 # std_np = coords_labels_np[:, :10].std(axis=0)
 # means_np = coords_labels_np[:, :10].mean(axis=0)

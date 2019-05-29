@@ -20,8 +20,8 @@ class Net(nn.Module):
         return self.head(x)
 
 
-images_np = np.load("../images.npy").astype(np.float32)
-labels_np = np.load("../labels.npy").astype(np.float32)
+images_np = np.load("../data/images.npy").astype(np.float32)
+labels_np = np.load("../data/labels.npy").astype(np.float32)
 
 data_size = images_np.shape[0]
 batch_size = 32
