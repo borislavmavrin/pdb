@@ -8,10 +8,11 @@ class Net(nn.Module):
 
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=2, stride=1)
-        self.linear1 = nn.Linear(128 * 1 * 1, 128)
-        self.head = nn.Linear(128, 23)
+        num_kernels = 32
+        self.conv1 = nn.Conv2d(5, num_kernels, kernel_size=3, stride=1)
+        self.conv2 = nn.Conv2d(num_kernels, num_kernels, kernel_size=2, stride=1)
+        self.linear1 = nn.Linear(num_kernels * 1 * 1, num_kernels)
+        self.head = nn.Linear(num_kernels, 23)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -20,9 +21,8 @@ class Net(nn.Module):
         return self.head(x)
 
 
-images_np = np.load("../data/images.npy").astype(np.float32)
+images_np = np.load("../data/multi_ch_images.npy").astype(np.float32)
 labels_np = np.load("../data/labels.npy").astype(np.float32)
-coords_labels_np = np.loadtxt("../data/coords_labels.txt").astype(np.float32)
 
 data_size = images_np.shape[0]
 batch_size = 32
@@ -37,8 +37,7 @@ for epoch in range(num_epochs):
     print(epoch)
     for batch in range(num_batches):
         batch_idx = np.random.randint(0, data_size, batch_size)
-        images_batch_tr = torch.from_numpy(images_np[batch_idx]).float().to(device).unsqueeze(1) + 1.
-        images_batch_tr /= 5.
+        images_batch_tr = torch.from_numpy(images_np[batch_idx]).float().to(device)
         labels_tr = torch.from_numpy(labels_np[batch_idx]).long().to(device).squeeze()
 
         optimizer.zero_grad()
@@ -48,8 +47,7 @@ for epoch in range(num_epochs):
         optimizer.step()
 
     batch_idx = np.random.randint(0, data_size, 10000)
-    images_batch_tr = torch.from_numpy(images_np[batch_idx]).float().to(device).unsqueeze(1) + 1.
-    images_batch_tr /= 5.
+    images_batch_tr = torch.from_numpy(images_np[batch_idx]).float().to(device)
     labels_tr = torch.from_numpy(labels_np[batch_idx]).long().to(device).squeeze()
 
     scores = net(images_batch_tr).detach()
