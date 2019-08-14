@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import math
 from utility import *
 
 
@@ -54,6 +55,20 @@ class Data:
 			self.x.append(getFeature(i, self.pattern))
 		return torch.FloatTensor(self.x), torch.LongTensor(self.y)
 
+	def get_batch_rank(self):
+		self.x.clear()
+		self.y.clear()
+		self.lower = self.count * self.batch_size
+		self.upper = (self.count + 1) * self.batch_size
+		self.count += 1
+		if self.upper >= len(self.label):
+			self.upper = len(self.label)
+			self.count = 0
+		for i in self.idx[range(self.lower, self.upper)]:
+			self.y.append(self.label[i])
+			self.x.append([i])
+			return torch.FloatTensor(self.x), torch.LongTensor(self.y)
+
 	def get_num_wrong_prediction(self, model, device):
 		ct = 0
 		num_wrongPrediction = 0
@@ -67,6 +82,7 @@ class Data:
 				x = []
 				y = []
 				for i in self.idx[range(lower, upper)]:
+
 					y.append(self.label[i])
 					x.append(getFeature(i, self.pattern))
 					temp_features = torch.FloatTensor(x).to(device)
@@ -82,7 +98,7 @@ class Data:
 				upper = len(self.label)
 				x = []
 				y = []
-				for i in range(lower, upper):
+				for i in self.idx[range(lower, upper)]:
 					y.append(self.label[i])
 					x.append(getFeature(i, self.pattern))
 					temp_features = torch.FloatTensor(x).to(device)
@@ -94,7 +110,7 @@ class Data:
 					if prediction[i] > temp_labels[i]:
 						num_wrongPrediction += 1
 				break
-			print(num_wrongPrediction - temp, "/", num_wrongPrediction, (num_wrongPrediction - temp)/num_wrongPrediction)
+			print(num_wrongPrediction - temp, num_wrongPrediction)
 		return num_wrongPrediction
 
 
@@ -105,11 +121,30 @@ def readPDB(filename, pattern):
 		byte = f.read(1)
 		count = 0
 		while byte:
-			y.append(ord(byte))
+			y.append([ord(byte)])
 			x.append(getFeature(count, pattern))
 			byte = f.read(1)
 			count += 1
+	return torch.FloatTensor(x), torch.FloatTensor(y)
+	# return torch.LongTensor(y)
+
+def readSplitPDB(filename, pattern, div, nth):
+	mx = int(math.factorial(16)/math.factorial(16 - len(pattern)))
+	offset = int(mx/div*nth)
+	print(mx, offset)
+	y = []
+	x = []
+	with open(filename, "rb") as f:
+		byte = f.read(1)
+		count = 0
+		while byte:
+			y.append([ord(byte)])
+			x.append(getFeature(count+offset, pattern))
+			byte = f.read(1)
+			count += 1
 	return torch.FloatTensor(x), torch.LongTensor(y)
+
+
 
 
 def readCoord(filename, numTiles):
