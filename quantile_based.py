@@ -73,6 +73,8 @@ if __name__ == "__main__":
 
     accuracy_lst = []
     bias_lst = []
+    avg_q_heuristic_lst = []
+    avg_heuristic_lst = []
     for i in range(num_batches):
         x, y = data.get_batch()
         x = x.to(device)
@@ -88,7 +90,12 @@ if __name__ == "__main__":
         acc = getAccuracy_underestim(q_predictions, y_np)
         accuracy_lst.append(acc)
         bias_lst.append((np.abs(y_np - q_predictions)).mean())
+        avg_q_heuristic_lst.append(q_predictions.mean())
+        avg_heuristic_lst.append(prediction_np.mean())
     print("Accuracy: " + str(np.mean(accuracy_lst)))
     print("std err of accuracy: " + str(np.std(accuracy_lst) / batch_size))
     print("MAD: " + str(np.mean(bias_lst)))
     print("std of prediction: " + str(q_predictions.std()))
+    print("Average quantile based hearistic: " + str(np.mean(avg_q_heuristic_lst)))
+    print("Average hearistic: " + str(np.mean(avg_heuristic_lst)))
+
