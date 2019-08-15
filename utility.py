@@ -60,7 +60,9 @@ def my_loss(output, target):
 	a = 1
 	b = 5
 	target = target.type(torch.FloatTensor).to("cuda")
-	return (output-target) * (a + 1/(1+(torch.exp(-b * (output-target))))).mean()
+	loss = (output-target) * (a + 1. / (1. + (torch.exp(-b * (output-target)))))
+	loss = loss.mean()
+	return loss
 
 # unrank(3, [1,2,3,4,5])
 
