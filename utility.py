@@ -59,8 +59,9 @@ def getFeature(count, pattern):
 def my_loss(output, target):
 	a = 1
 	b = 5
-	target = target.type(torch.FloatTensor).to("cuda")
-	loss = (output-target) * (a + 1. / (1. + (torch.exp(-b * (output-target)))))
+	target = target.float()
+	err = (output - target) ** 2
+	loss = err * (a + 1. / (1. + (torch.exp(-b * err))))
 	loss = loss.mean()
 	return loss
 

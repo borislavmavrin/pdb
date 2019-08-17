@@ -82,7 +82,7 @@ def main():
 			x, y = data.get_batch()
 			x = x.to(device)
 			y = y.to(device)
-			out = model(x)
+			out = model(x).squeeze()
 			loss = loss_fn(out, y)
 			optimizer.zero_grad()
 			loss.backward()
