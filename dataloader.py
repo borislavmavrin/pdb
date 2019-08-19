@@ -53,7 +53,7 @@ class Data:
 		for i in self.idx[range(self.lower, self.upper)]:
 			self.y.append(self.label[i])
 			self.x.append(getFeature(i, self.pattern))
-		return torch.FloatTensor(self.x), torch.LongTensor(self.y)
+		return self.x, self.y
 
 	def get_batch_rank(self):
 		self.x.clear()
