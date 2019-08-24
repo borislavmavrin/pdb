@@ -8,6 +8,7 @@ import os
 from torch.utils.data import Dataset, DataLoader
 from nn.torch_data_loader import MultiChannelDataset
 import time
+import logging
 
 
 class Net(nn.Module):
@@ -28,6 +29,7 @@ class Net(nn.Module):
 
 
 if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
     num_epochs = 10
     num_samples = 10
@@ -35,7 +37,7 @@ if __name__ == '__main__':
 
     net = Net().to(device).float()
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(net.parameters(), lr=5e-4)
 
     data_file = "compDelta1-7.txt"
     pattern = [1, 2, 3, 4, 5, 6, 7]
@@ -48,42 +50,32 @@ if __name__ == '__main__':
                             shuffle=True, num_workers=64)
 
     num_batches = len(dataloader)
+    log_steps = num_batches // 10
 
+    epoch = 1
     start_time = time.time()
     for epoch in range(num_epochs):
-
+        logging.info('epoch: %s', epoch)
         for i_batch, sample_batched in enumerate(dataloader):
-            # print(i_batch)
-            # print(i_batch, sample_batched['state'].size(),
-            #       sample_batched['label'].size())
+            if i_batch % log_steps == 0:
+                elapsed_time = time.time() - start_time
+                examples_per_second = batch_size * log_steps / elapsed_time
+                start_time = time.time()
+                scores = net(sample_batched['state'].to(device).float())
+                labels = sample_batched['label'].to(device)
+                scores = scores.detach()
+                predictions = scores.argmax(dim=1)
+                accuracy = labels == predictions
+                accuracy = accuracy.cpu().numpy()
+                accuracy = accuracy.sum() / accuracy.shape[0]
+                logging.info('states per second: %s', examples_per_second)
+                logging.info('accuracy: %s', accuracy)
+                # logging.info('i_batch: %s', i_batch)
+
             scores = net(sample_batched['state'].to(device).float())
             optimizer.zero_grad()
             loss = criterion(scores, sample_batched['label'].to(device))
             loss.backward()
             optimizer.step()
-            if i_batch == num_batches:
-                print('epoch ' + str(epoch) + ' finished')
-                elapsed_time = time.time() - start_time
-                elapsed_time = elapsed_time // 60.
-                print('time: ' + str(elapsed_time) + ' min')
-                break
+    logging.info('finished training')
 
-        # accuracy_lst = []
-        # for s in range(num_samples):
-        #     x, y = data.get_batch()
-        #     y_np = np.array(y)
-        #     s_np = np.array(x)
-        #     s_np = s_np.reshape((-1, 2)).astype(int)
-        #     z = np.zeros((batch_size, 7, 4, 4))
-        #     z[np.repeat(np.arange(batch_size), 7), np.tile(np.arange(7), batch_size), s_np[:, 0], s_np[:, 1]] = 1.
-        #     images_batch_tr = torch.from_numpy(z).float()
-        #     scores = net(images_batch_tr)
-        #     predictions = scores.argmax(dim=1)
-        #     labels_tr = torch.from_numpy(y_np).long()
-        #
-        #     accuracy = np.sum(labels_tr.detach().cpu().numpy() == predictions.detach().cpu().numpy())
-        #     accuracy /= y_np.shape[0]
-        #     accuracy_lst.append(accuracy)
-        # print(np.mean(accuracy_lst))
-        # data.reshuffle()
-    # print(np.max(lables_lst))
