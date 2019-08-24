@@ -43,6 +43,7 @@ def unrank(n, pattern):
 	# print(s)
 	return s
 
+
 def getFeature(count, pattern):
 	feature = []
 	s = unrank(count, pattern)
@@ -51,8 +52,8 @@ def getFeature(count, pattern):
 		if s[i] != -1:
 			dual[s[i]] = i
 	for j in range(len(pattern)):
-		feature.append(dual[pattern[j]]//4)
-		feature.append(dual[pattern[j]]%4)
+		feature.append(dual[pattern[j]] // 4)
+		feature.append(dual[pattern[j]] % 4)
 	# print(feature)
 	return feature
 
