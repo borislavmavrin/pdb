@@ -38,7 +38,7 @@ class Data:
 				byte = f.read(1)
 		self.data_size = len(self.label)
 		self.idx = np.arange(self.data_size)
-		np.random.shuffle(self.idx)
+		# np.random.shuffle(self.idx)
 
 	def get_batch(self):
 		self.x.clear()
