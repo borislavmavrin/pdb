@@ -9,6 +9,8 @@ from torch.utils.data import Dataset, DataLoader
 from nn.torch_data_loader import MultiChannelDataset
 import time
 import logging
+from hyperopt import hp
+from hyperopt import fmin, tpe, space_eval
 
 
 class Net(nn.Module):
@@ -34,16 +36,18 @@ class Net(nn.Module):
         return self.head(x)
 
 
-if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+def objective(args):
+    num_epochs = 5
+    lr = float(args['lr'])
+    num_kernels = int(args['num_kernels'])
+    num_layers = int(args['num_layers'])
 
-    num_epochs = 10
-    num_samples = 10
+    num_labels = 15
     device = 'cuda:1'
 
-    net = Net(32, 15, 2).to(device).float()
+    net = Net(num_kernels, num_labels, num_layers).to(device).float()
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
 
     data_file = "compDelta1-7.txt"
     pattern = [1, 2, 3, 4, 5, 6, 7]
@@ -58,7 +62,6 @@ if __name__ == '__main__':
     num_batches = len(dataloader)
     log_steps = num_batches // 10
 
-    epoch = 1
     start_time = time.time()
     for epoch in range(num_epochs):
         logging.info('epoch: %s', epoch)
@@ -86,3 +89,38 @@ if __name__ == '__main__':
             optimizer.step()
     logging.info('finished training')
 
+    dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 2,
+                            shuffle=True, num_workers=96)
+    logging.info('calculating exact accuracy...')
+    exact_accuracy_lst = []
+    for i_batch, sample_batched in enumerate(dataloader):
+        scores = net(sample_batched['state'].to(device).float())
+        labels = sample_batched['label'].to(device).long()
+        scores = scores.detach()
+        predictions = scores.argmax(dim=1)
+        accuracy = labels == predictions
+        accuracy = accuracy.cpu().numpy()
+        accuracy = accuracy.sum() / accuracy.shape[0]
+        exact_accuracy_lst.append(accuracy)
+    exact_accuracy = np.mean(exact_accuracy_lst)
+
+    logging.info('exact accuracy: %s', exact_accuracy)
+
+    return -exact_accuracy
+
+
+if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.ERROR)
+
+    params = {
+        'lr': hp.uniform('lr', 1e-5, 1e-1),
+        'num_kernels': hp.quniform('num_kernels', 5, 100, 1),
+        'num_layers': hp.quniform('num_layers', 1, 10, 1),
+    }
+    space = params
+
+    # minimize the objective over the space
+    best = fmin(objective, space, algo=tpe.suggest, max_evals=100)
+
+    print(best)
+    print(space_eval(space, best))
