@@ -1,9 +1,5 @@
-import numpy as np
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from dataloader import *
-import pickle
 import os
 from torch.utils.data import Dataset, DataLoader
 from nn.torch_data_loader import MultiChannelDataset
@@ -11,29 +7,7 @@ import time
 import logging
 from hyperopt import hp
 from hyperopt import fmin, tpe, space_eval
-
-
-class Net(nn.Module):
-
-    def __init__(self, num_kernels, num_layers, num_labels):
-        super(Net, self).__init__()
-        self.num_kernels = num_kernels
-        self.num_layers = num_layers
-        self.num_labels = num_labels
-        self.conv1 = nn.Conv2d(7, self.num_kernels, kernel_size=3, stride=1)
-        self.conv2 = nn.Conv2d(self.num_kernels, self.num_kernels, kernel_size=2, stride=1)
-        self.linear_lst = nn.ModuleList()
-        for l in range(self.num_layers):
-            self.linear_lst.append(nn.Linear(self.num_kernels, self.num_kernels))
-        self.head = nn.Linear(self.num_kernels, self.num_labels)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = x.view(x.shape[0], -1)
-        for linear in self.linear_lst:
-            x = F.relu(linear(x))
-        return self.head(x)
+from nn.cnn_binary_maps_delta_q import Net, get_quantile
 
 
 def objective(args):
@@ -41,11 +15,15 @@ def objective(args):
     lr = float(args['lr'])
     num_kernels = int(args['num_kernels'])
     num_layers = int(args['num_layers'])
+    q_level = float(args['q_level'])
 
     num_labels = 15
-    device = 'cuda:1'
+    num_workers = 64
+    device = 'cuda:0'
 
     net = Net(num_kernels, num_layers, num_labels).to(device).float()
+    softmax = nn.Softmax(dim=1)
+
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
 
@@ -57,30 +35,11 @@ def objective(args):
     batch_size = 32 * 312
     multi_channel_dataset = MultiChannelDataset(pdb_file=data_path, pattern=pattern)
     dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size,
-                            shuffle=True, num_workers=96)
+                            shuffle=True, num_workers=num_workers)
 
-    num_batches = len(dataloader)
-    log_steps = num_batches // 10
-
-    start_time = time.time()
     for epoch in range(num_epochs):
         logging.info('epoch: %s', epoch)
         for i_batch, sample_batched in enumerate(dataloader):
-            if i_batch % log_steps == 0:
-                elapsed_time = time.time() - start_time
-                examples_per_second = batch_size * log_steps / elapsed_time
-                start_time = time.time()
-                scores = net(sample_batched['state'].to(device).float())
-                labels = sample_batched['label'].to(device).long()
-                scores = scores.detach()
-                predictions = scores.argmax(dim=1)
-                accuracy = labels == predictions
-                accuracy = accuracy.cpu().numpy()
-                accuracy = accuracy.sum() / accuracy.shape[0]
-                logging.info('states per second: %s', examples_per_second)
-                logging.info('accuracy: %s', accuracy)
-                # logging.info('i_batch: %s', i_batch)
-
             scores = net(sample_batched['state'].to(device).float())
             optimizer.zero_grad()
             labels = sample_batched['label'].to(device).long()
@@ -90,21 +49,31 @@ def objective(args):
     logging.info('finished training')
 
     dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 2,
-                            shuffle=True, num_workers=96)
+                            shuffle=True, num_workers=num_workers)
     logging.info('calculating exact accuracy...')
     exact_accuracy_lst = []
+    avg_predicted_heuristic_lst = []
     for i_batch, sample_batched in enumerate(dataloader):
         scores = net(sample_batched['state'].to(device).float())
         labels = sample_batched['label'].to(device).long()
         scores = scores.detach()
-        predictions = scores.argmax(dim=1)
-        accuracy = labels == predictions
-        accuracy = accuracy.cpu().numpy()
+        # predictions = scores.argmax(dim=1)
+        # accuracy = labels == predictions
+        probs = softmax(scores)
+        probs = probs.cpu().numpy()
+        q_predictions = np.array([get_quantile(p, q_level) for p in probs])
+        accuracy = q_predictions <= labels.detach().cpu().numpy()
         accuracy = accuracy.sum() / accuracy.shape[0]
         exact_accuracy_lst.append(accuracy)
+        avg_predicted_heuristic_lst.append(q_predictions.mean())
     exact_accuracy = np.mean(exact_accuracy_lst)
+    avg_predicted_heuristic = np.mean(avg_predicted_heuristic_lst)
 
     logging.info('exact accuracy: %s', exact_accuracy)
+    logging.info('average predicted heauristic: %s', avg_predicted_heuristic)
+
+    if avg_predicted_heuristic < 3.:
+        exact_accuracy = 0.
 
     return -exact_accuracy
 
@@ -116,11 +85,12 @@ if __name__ == '__main__':
         'lr': hp.uniform('lr', 1e-5, 1e-1),
         'num_kernels': hp.quniform('num_kernels', 5, 100, 1),
         'num_layers': hp.quniform('num_layers', 1, 10, 1),
+        'q_level': hp.uniform('q_level', 0.01, 0.9)
     }
     space = params
 
     # minimize the objective over the space
-    best = fmin(objective, space, algo=tpe.suggest, max_evals=60)
+    best = fmin(objective, space, algo=tpe.suggest, max_evals=100)
 
     print(best)
     print(space_eval(space, best))

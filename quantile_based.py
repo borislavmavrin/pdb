@@ -45,7 +45,7 @@ class Net(nn.Module):
 def get_quantile(probs_, quantile_level_):
     cdf = np.cumsum(probs_)
     idx = np.arange(probs_.shape[0])
-    return idx[cdf > quantile_level_].min()
+    return idx[cdf >= quantile_level_].min()
 
 
 if __name__ == "__main__":

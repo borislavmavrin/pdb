@@ -9,8 +9,6 @@ from torch.utils.data import Dataset, DataLoader
 from nn.torch_data_loader import MultiChannelDataset
 import time
 import logging
-from hyperopt import hp
-from hyperopt import fmin, tpe, space_eval
 
 
 class Net(nn.Module):
@@ -36,18 +34,35 @@ class Net(nn.Module):
         return self.head(x)
 
 
-def objective(args):
-    num_epochs = 5
-    lr = float(args['lr'])
-    num_kernels = int(args['num_kernels'])
-    num_layers = int(args['num_layers'])
+def get_num_weights(model):
+    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+    num_weights_ = np.sum([np.prod(p.size()) for p in model_parameters])
+    return int(num_weights_)
 
-    num_labels = 15
-    device = 'cuda:1'
 
-    net = Net(num_kernels, num_layers, num_labels).to(device).float()
+def get_quantile(probs_, quantile_level_):
+    cdf = np.cumsum(probs_)
+    idx = np.arange(probs_.shape[0])
+    return idx[cdf >= quantile_level_].min()
+
+
+if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+
+    num_epochs = 10
+    num_samples = 10
+    q_level = 0.5
+    device = 'cuda:0'
+    num_workers = 64
+
+    net = Net(32, 2, 15).to(device).float()
+    softmax = nn.Softmax(dim=1)
+
+    # num_weights = get_num_weights(net)
+    # logging.info('number of weights: %s', num_weights)
+
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
     data_file = "compDelta1-7.txt"
     pattern = [1, 2, 3, 4, 5, 6, 7]
@@ -57,7 +72,7 @@ def objective(args):
     batch_size = 32 * 312
     multi_channel_dataset = MultiChannelDataset(pdb_file=data_path, pattern=pattern)
     dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size,
-                            shuffle=True, num_workers=96)
+                            shuffle=True, num_workers=num_workers)
 
     num_batches = len(dataloader)
     log_steps = num_batches // 10
@@ -72,13 +87,27 @@ def objective(args):
                 start_time = time.time()
                 scores = net(sample_batched['state'].to(device).float())
                 labels = sample_batched['label'].to(device).long()
+                loss = criterion(scores, labels)
+                loss = loss.detach().cpu().numpy()
+
                 scores = scores.detach()
-                predictions = scores.argmax(dim=1)
-                accuracy = labels == predictions
-                accuracy = accuracy.cpu().numpy()
+                # predictions = scores.argmax(dim=1)
+                # accuracy = labels == predictions
+                probs = softmax(scores)
+                probs = probs.cpu().numpy()
+                q_predictions = np.array([get_quantile(p, q_level) for p in probs])
+
+                accuracy = q_predictions <= labels.detach().cpu().numpy()
                 accuracy = accuracy.sum() / accuracy.shape[0]
+
+                avg_heuristic_hat = q_predictions.mean()
+                avg_heuristic = labels.cpu().numpy().mean()
+
                 logging.info('states per second: %s', examples_per_second)
                 logging.info('accuracy: %s', accuracy)
+                logging.info('average predicted heuristic: %s', avg_heuristic_hat)
+                logging.info('average heuristic: %s', avg_heuristic)
+                logging.info('loss: %s', loss)
                 # logging.info('i_batch: %s', i_batch)
 
             scores = net(sample_batched['state'].to(device).float())
@@ -90,38 +119,35 @@ def objective(args):
     logging.info('finished training')
 
     dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 2,
-                            shuffle=True, num_workers=96)
+                            shuffle=True, num_workers=num_workers)
     logging.info('calculating exact accuracy...')
+    negative_counts = 0
     exact_accuracy_lst = []
+    avg_heuristic_hat_lst = []
     for i_batch, sample_batched in enumerate(dataloader):
         scores = net(sample_batched['state'].to(device).float())
         labels = sample_batched['label'].to(device).long()
         scores = scores.detach()
-        predictions = scores.argmax(dim=1)
-        accuracy = labels == predictions
-        accuracy = accuracy.cpu().numpy()
+        # predictions = scores.argmax(dim=1)
+        # accuracy = labels == predictions
+        probs = softmax(scores)
+        probs = probs.cpu().numpy()
+        q_predictions = np.array([get_quantile(p, q_level) for p in probs])
+
+        accuracy = q_predictions <= labels.detach().cpu().numpy()
         accuracy = accuracy.sum() / accuracy.shape[0]
         exact_accuracy_lst.append(accuracy)
+
+        avg_heuristic_hat = q_predictions.mean()
+        avg_heuristic_hat_lst.append(avg_heuristic_hat)
+        avg_heuristic = labels.cpu().numpy().mean()
+
+        logging.info('states per second: %s', examples_per_second)
+        logging.info('accuracy: %s', accuracy)
+        logging.info('average predicted heuristic: %s', avg_heuristic_hat)
+        logging.info('average heuristic: %s', avg_heuristic)
+        logging.info('loss: %s', loss)
+
     exact_accuracy = np.mean(exact_accuracy_lst)
 
     logging.info('exact accuracy: %s', exact_accuracy)
-
-    return -exact_accuracy
-
-
-if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.ERROR)
-
-    params = {
-        'lr': hp.uniform('lr', 1e-5, 1e-1),
-        'num_kernels': hp.quniform('num_kernels', 5, 100, 1),
-        'num_layers': hp.quniform('num_layers', 1, 10, 1),
-    }
-    space = params
-
-    # minimize the objective over the space
-    best = fmin(objective, space, algo=tpe.suggest, max_evals=60)
-
-    print(best)
-    print(space_eval(space, best))
-    # 'num_layers': 3.0, 'lr': 0.008380422744568105, 'num_kernels': 97.0

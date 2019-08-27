@@ -9,23 +9,21 @@ from torch.utils.data import Dataset, DataLoader
 from nn.torch_data_loader import MultiChannelDataset
 import time
 import logging
-from hyperopt import hp
-from hyperopt import fmin, tpe, space_eval
 
 
 class Net(nn.Module):
 
-    def __init__(self, num_kernels, num_layers, num_labels):
+    def __init__(self, num_kernels, num_layers, num_quantiles):
         super(Net, self).__init__()
         self.num_kernels = num_kernels
         self.num_layers = num_layers
-        self.num_labels = num_labels
+        self.num_quantiles = num_quantiles
         self.conv1 = nn.Conv2d(7, self.num_kernels, kernel_size=3, stride=1)
         self.conv2 = nn.Conv2d(self.num_kernels, self.num_kernels, kernel_size=2, stride=1)
         self.linear_lst = nn.ModuleList()
         for l in range(self.num_layers):
             self.linear_lst.append(nn.Linear(self.num_kernels, self.num_kernels))
-        self.head = nn.Linear(self.num_kernels, self.num_labels)
+        self.head = nn.Linear(self.num_kernels, self.num_quantiles)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -36,18 +34,32 @@ class Net(nn.Module):
         return self.head(x)
 
 
-def objective(args):
+def qr_loss(theta_, labels_, device_):
+    num_quantiles_ = theta_.shape[1]
+    tau = torch.arange(1, num_quantiles_ + 1).to(device_).float() / num_quantiles_
+
+    labels_ = labels_.view(-1, 1)
+    u = labels_ - theta_
+    d = (u.detach() < 0).float().detach()
+    criterion = nn.SmoothL1Loss(reduction='none')
+    l1 = criterion(u, labels_.repeat(1, num_quantiles_))
+    l = (tau - d).abs() * l1
+    l = l.sum(dim=1).mean()
+    return l
+
+
+if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+
     num_epochs = 5
-    lr = float(args['lr'])
-    num_kernels = int(args['num_kernels'])
-    num_layers = int(args['num_layers'])
+    num_samples = 10
+    num_quantiles = 11
+    num_workers = 64
+    q_level_idx = 6
+    device = 'cuda:0'
 
-    num_labels = 15
-    device = 'cuda:1'
-
-    net = Net(num_kernels, num_layers, num_labels).to(device).float()
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+    net = Net(32, 1, num_quantiles).to(device).float()
+    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
     data_file = "compDelta1-7.txt"
     pattern = [1, 2, 3, 4, 5, 6, 7]
@@ -57,11 +69,12 @@ def objective(args):
     batch_size = 32 * 312
     multi_channel_dataset = MultiChannelDataset(pdb_file=data_path, pattern=pattern)
     dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size,
-                            shuffle=True, num_workers=96)
+                            shuffle=True, num_workers=num_workers)
 
     num_batches = len(dataloader)
     log_steps = num_batches // 10
 
+    epoch = 1
     start_time = time.time()
     for epoch in range(num_epochs):
         logging.info('epoch: %s', epoch)
@@ -70,58 +83,55 @@ def objective(args):
                 elapsed_time = time.time() - start_time
                 examples_per_second = batch_size * log_steps / elapsed_time
                 start_time = time.time()
-                scores = net(sample_batched['state'].to(device).float())
-                labels = sample_batched['label'].to(device).long()
-                scores = scores.detach()
-                predictions = scores.argmax(dim=1)
-                accuracy = labels == predictions
+
+                labels = sample_batched['label'].to(device).float()
+                theta = net(sample_batched['state'].to(device).float())
+                theta = theta.detach()
+                loss = qr_loss(theta, labels, device).detach().cpu().numpy()
+                # predictions = theta.mean(dim=1)
+                predictions = theta[:, q_level_idx]
+                accuracy = predictions <= labels
                 accuracy = accuracy.cpu().numpy()
                 accuracy = accuracy.sum() / accuracy.shape[0]
+
+                predictions = predictions.cpu().numpy()
+                predictions[predictions < 0.] = 0.
+                avg_heuristic_hat = predictions.mean()
+
+                avg_heuristic = labels.cpu().numpy().mean()
+
                 logging.info('states per second: %s', examples_per_second)
                 logging.info('accuracy: %s', accuracy)
+                logging.info('average predicted heuristic: %s', avg_heuristic_hat)
+                logging.info('average heuristic: %s', avg_heuristic)
+                logging.info('loss: %s', loss)
                 # logging.info('i_batch: %s', i_batch)
 
-            scores = net(sample_batched['state'].to(device).float())
+            theta = net(sample_batched['state'].to(device).float())
             optimizer.zero_grad()
-            labels = sample_batched['label'].to(device).long()
-            loss = criterion(scores, labels)
+            labels = sample_batched['label'].to(device).float()
+            loss = qr_loss(theta, labels, device)
+            # logging.info('loss: %s', loss)
             loss.backward()
             optimizer.step()
     logging.info('finished training')
 
     dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 2,
-                            shuffle=True, num_workers=96)
+                            shuffle=True, num_workers=num_workers)
     logging.info('calculating exact accuracy...')
+    negative_counts = 0
     exact_accuracy_lst = []
     for i_batch, sample_batched in enumerate(dataloader):
-        scores = net(sample_batched['state'].to(device).float())
-        labels = sample_batched['label'].to(device).long()
-        scores = scores.detach()
-        predictions = scores.argmax(dim=1)
-        accuracy = labels == predictions
+        theta = net(sample_batched['state'].to(device).float())
+        theta = theta.detach()
+        labels = sample_batched['label'].to(device).float()
+        predictions = theta[:, 1]
+        accuracy = predictions <= labels
         accuracy = accuracy.cpu().numpy()
         accuracy = accuracy.sum() / accuracy.shape[0]
         exact_accuracy_lst.append(accuracy)
+        negative_counts += (predictions < 0.).detach().cpu().numpy().sum()
     exact_accuracy = np.mean(exact_accuracy_lst)
 
     logging.info('exact accuracy: %s', exact_accuracy)
-
-    return -exact_accuracy
-
-
-if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.ERROR)
-
-    params = {
-        'lr': hp.uniform('lr', 1e-5, 1e-1),
-        'num_kernels': hp.quniform('num_kernels', 5, 100, 1),
-        'num_layers': hp.quniform('num_layers', 1, 10, 1),
-    }
-    space = params
-
-    # minimize the objective over the space
-    best = fmin(objective, space, algo=tpe.suggest, max_evals=60)
-
-    print(best)
-    print(space_eval(space, best))
-    # 'num_layers': 3.0, 'lr': 0.008380422744568105, 'num_kernels': 97.0
+    logging.info('negative counts: %s', negative_counts)
