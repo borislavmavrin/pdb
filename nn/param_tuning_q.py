@@ -11,7 +11,7 @@ from nn.cnn_binary_maps_delta_q import Net, get_quantile
 
 
 def objective(args):
-    num_epochs = 5
+    num_epochs = 1
     lr = float(args['lr'])
     num_kernels = int(args['num_kernels'])
     num_layers = int(args['num_layers'])
@@ -72,7 +72,7 @@ def objective(args):
     logging.info('exact accuracy: %s', exact_accuracy)
     logging.info('average predicted heauristic: %s', avg_predicted_heuristic)
 
-    if avg_predicted_heuristic < 3.:
+    if avg_predicted_heuristic < 3.5:
         exact_accuracy = 0.
 
     return -exact_accuracy
@@ -95,3 +95,4 @@ if __name__ == '__main__':
     print(best)
     print(space_eval(space, best))
     # 'num_layers': 3.0, 'lr': 0.008380422744568105, 'num_kernels': 97.0
+    # {'num_layers': 2.0, 'num_kernels': 46.0, 'lr': 0.010392954780225002, 'q_level': 0.025473899900400707}

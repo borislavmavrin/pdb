@@ -49,17 +49,20 @@ def get_quantile(probs_, quantile_level_):
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
-    num_epochs = 10
-    num_samples = 10
-    q_level = 0.5
-    device = 'cuda:0'
+    lr = 0.01
+    num_kernels = 46
+    num_layers = 2
+    q_level = 0.025
+    num_epochs = 1
+
+    device = 'cuda:1'
     num_workers = 64
 
-    net = Net(32, 2, 15).to(device).float()
+    net = Net(num_kernels, num_layers, 15).to(device).float()
     softmax = nn.Softmax(dim=1)
 
-    # num_weights = get_num_weights(net)
-    # logging.info('number of weights: %s', num_weights)
+    num_weights = get_num_weights(net)
+    logging.info('number of weights: %s', num_weights)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
@@ -78,47 +81,47 @@ if __name__ == '__main__':
     log_steps = num_batches // 10
 
     start_time = time.time()
-    for epoch in range(num_epochs):
-        logging.info('epoch: %s', epoch)
-        for i_batch, sample_batched in enumerate(dataloader):
-            if i_batch % log_steps == 0:
-                elapsed_time = time.time() - start_time
-                examples_per_second = batch_size * log_steps / elapsed_time
-                start_time = time.time()
-                scores = net(sample_batched['state'].to(device).float())
-                labels = sample_batched['label'].to(device).long()
-                loss = criterion(scores, labels)
-                loss = loss.detach().cpu().numpy()
-
-                scores = scores.detach()
-                # predictions = scores.argmax(dim=1)
-                # accuracy = labels == predictions
-                probs = softmax(scores)
-                probs = probs.cpu().numpy()
-                q_predictions = np.array([get_quantile(p, q_level) for p in probs])
-
-                accuracy = q_predictions <= labels.detach().cpu().numpy()
-                accuracy = accuracy.sum() / accuracy.shape[0]
-
-                avg_heuristic_hat = q_predictions.mean()
-                avg_heuristic = labels.cpu().numpy().mean()
-
-                logging.info('states per second: %s', examples_per_second)
-                logging.info('accuracy: %s', accuracy)
-                logging.info('average predicted heuristic: %s', avg_heuristic_hat)
-                logging.info('average heuristic: %s', avg_heuristic)
-                logging.info('loss: %s', loss)
-                # logging.info('i_batch: %s', i_batch)
-
-            scores = net(sample_batched['state'].to(device).float())
-            optimizer.zero_grad()
-            labels = sample_batched['label'].to(device).long()
-            loss = criterion(scores, labels)
-            loss.backward()
-            optimizer.step()
+    # for epoch in range(num_epochs):
+    #     logging.info('epoch: %s', epoch)
+    #     for i_batch, sample_batched in enumerate(dataloader):
+    #         if i_batch % log_steps == 0:
+    #             elapsed_time = time.time() - start_time
+    #             examples_per_second = batch_size * log_steps / elapsed_time
+    #             start_time = time.time()
+    #             scores = net(sample_batched['state'].to(device).float())
+    #             labels = sample_batched['label'].to(device).long()
+    #             loss = criterion(scores, labels)
+    #             loss = loss.detach().cpu().numpy()
+    #
+    #             scores = scores.detach()
+    #             # predictions = scores.argmax(dim=1)
+    #             # accuracy = labels == predictions
+    #             probs = softmax(scores)
+    #             probs = probs.cpu().numpy()
+    #             q_predictions = np.array([get_quantile(p, q_level) for p in probs])
+    #
+    #             accuracy = q_predictions <= labels.detach().cpu().numpy()
+    #             accuracy = accuracy.sum() / accuracy.shape[0]
+    #
+    #             avg_heuristic_hat = q_predictions.mean()
+    #             avg_heuristic = labels.cpu().numpy().mean()
+    #
+    #             logging.info('states per second: %s', examples_per_second)
+    #             logging.info('accuracy: %s', accuracy)
+    #             logging.info('average predicted heuristic: %s', avg_heuristic_hat)
+    #             logging.info('average heuristic: %s', avg_heuristic)
+    #             logging.info('loss: %s', loss)
+    #             # logging.info('i_batch: %s', i_batch)
+    #
+    #         scores = net(sample_batched['state'].to(device).float())
+    #         optimizer.zero_grad()
+    #         labels = sample_batched['label'].to(device).long()
+    #         loss = criterion(scores, labels)
+    #         loss.backward()
+    #         optimizer.step()
     logging.info('finished training')
 
-    dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 2,
+    dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 10,
                             shuffle=True, num_workers=num_workers)
     logging.info('calculating exact accuracy...')
     negative_counts = 0
@@ -142,12 +145,12 @@ if __name__ == '__main__':
         avg_heuristic_hat_lst.append(avg_heuristic_hat)
         avg_heuristic = labels.cpu().numpy().mean()
 
-        logging.info('states per second: %s', examples_per_second)
-        logging.info('accuracy: %s', accuracy)
-        logging.info('average predicted heuristic: %s', avg_heuristic_hat)
-        logging.info('average heuristic: %s', avg_heuristic)
-        logging.info('loss: %s', loss)
+        # logging.info('accuracy: %s', accuracy)
+        # logging.info('average predicted heuristic: %s', avg_heuristic_hat)
+        # logging.info('average heuristic: %s', avg_heuristic)
 
     exact_accuracy = np.mean(exact_accuracy_lst)
 
     logging.info('exact accuracy: %s', exact_accuracy)
+
+    # {'num_layers': 2.0, 'num_kernels': 46.0, 'lr': 0.010392954780225002, 'q_level': 0.025473899900400707}
