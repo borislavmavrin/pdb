@@ -52,11 +52,12 @@ def qr_loss(theta_, labels_, device_):
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
-    num_epochs = 5
+    num_epochs = 1
     num_quantiles = 201
     num_workers = 64
     q_level_idx = 10
     device = 'cuda:0'
+    shift = 1.
 
     net = Net(32, 1, num_quantiles).to(device).float()
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
@@ -84,12 +85,13 @@ if __name__ == '__main__':
                 examples_per_second = batch_size * log_steps / elapsed_time
                 start_time = time.time()
 
-                labels = sample_batched['label'].to(device).float()
+                labels = sample_batched['label']
+                labels = labels.to(device).float()
                 theta = net(sample_batched['state'].to(device).float())
                 theta = theta.detach()
                 loss = qr_loss(theta, labels, device).detach().cpu().numpy()
                 # predictions = theta.mean(dim=1)
-                predictions = theta[:, q_level_idx: q_level_idx + 1].mean(dim=1)
+                predictions = theta.mean(dim=1)
                 accuracy = predictions <= labels
                 accuracy = accuracy.cpu().numpy()
                 accuracy = accuracy.sum() / accuracy.shape[0]
@@ -108,7 +110,10 @@ if __name__ == '__main__':
                 # logging.info('i_batch: %s', i_batch)
 
             theta = net(sample_batched['state'].to(device).float())
-            labels = sample_batched['label'].to(device).float()
+            labels = sample_batched['label']
+            labels -= shift
+            labels[labels < 0.] = 0.
+            labels = labels.to(device).float()
             loss = qr_loss(theta, labels, device)
             # logging.info('loss: %s', loss)
             optimizer.zero_grad()
@@ -116,7 +121,7 @@ if __name__ == '__main__':
             optimizer.step()
     logging.info('finished training')
 
-    dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 10,
+    dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 2,
                             shuffle=True, num_workers=num_workers)
     logging.info('calculating exact accuracy...')
     exact_accuracy_lst = []
@@ -125,7 +130,7 @@ if __name__ == '__main__':
         theta = net(sample_batched['state'].to(device).float())
         theta = theta.detach()
         labels = sample_batched['label'].to(device).float()
-        predictions = theta[:, 1]
+        predictions = theta.mean(dim=1)
         accuracy = predictions <= labels
         accuracy = accuracy.cpu().numpy()
         accuracy = accuracy.sum() / accuracy.shape[0]

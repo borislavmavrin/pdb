@@ -1,5 +1,5 @@
-import numpy as np
-cimport numpy as np
+# import numpy as np
+# cimport numpy as np
 
 
 def unrank(n, pattern):

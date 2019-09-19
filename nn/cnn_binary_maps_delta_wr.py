@@ -6,7 +6,7 @@ from dataloader import *
 import pickle
 import os
 from torch.utils.data import Dataset, DataLoader
-from nn.torch_data_loader import MultiChannelDataset
+from nn.torch_data_loader_c import MultiChannelDataset
 import time
 import logging
 
@@ -17,7 +17,6 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.num_kernels = num_kernels
         self.num_layers = num_layers
-        self.num_quantiles = num_quantiles
         self.conv1 = nn.Conv2d(7, self.num_kernels, kernel_size=3, stride=1)
         self.conv2 = nn.Conv2d(self.num_kernels, self.num_kernels, kernel_size=2, stride=1)
         self.linear_lst = nn.ModuleList()
@@ -32,6 +31,12 @@ class Net(nn.Module):
         for linear in self.linear_lst:
             x = F.relu(linear(x))
         return self.head(x)
+
+
+def get_num_weights(model):
+    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+    num_weights_ = np.sum([np.prod(p.size()) for p in model_parameters])
+    return int(num_weights_)
 
 
 def wr_loss(prediction, target):
@@ -49,10 +54,8 @@ if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
     num_epochs = 1
-    num_samples = 10
-    num_quantiles = 11
     device = 'cuda:0'
-    num_workers = 16
+    num_workers = 64
 
     net = Net(32, 1).to(device).float()
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
@@ -70,7 +73,6 @@ if __name__ == '__main__':
     num_batches = len(dataloader)
     log_steps = num_batches // 10
 
-    epoch = 1
     start_time = time.time()
     for epoch in range(num_epochs):
         logging.info('epoch: %s', epoch)
@@ -79,17 +81,22 @@ if __name__ == '__main__':
                 elapsed_time = time.time() - start_time
                 examples_per_second = batch_size * log_steps / elapsed_time
                 start_time = time.time()
-                theta = net(sample_batched['state'].to(device).float())
-                labels = sample_batched['label'].to(device).float()
-                theta = theta.detach()
-                loss = wr_loss(theta, labels).detach().cpu().numpy()
+                predictions = net(sample_batched['state'].to(device).float()).detach().squeeze()
+                labels = sample_batched['label'].to(device).float().detach()
+                loss = wr_loss(predictions, labels).detach().cpu().numpy()
                 # predictions = theta.mean(dim=1)
-                predictions = theta.squeeze()
                 accuracy = predictions <= labels
                 accuracy = accuracy.cpu().numpy()
-                accuracy = accuracy.sum() / accuracy.shape[0]
+                accuracy = accuracy.sum() / float(accuracy.shape[0])
+
+                predictions[predictions < 0.] = 0.
+                avg_heuristic_hat = predictions.mean().cpu().numpy()
+                avg_heuristic = labels.mean().cpu().numpy()
+
                 logging.info('states per second: %s', examples_per_second)
                 logging.info('accuracy: %s', accuracy)
+                logging.info('average predicted heuristic: %s', avg_heuristic_hat)
+                logging.info('average heuristic: %s', avg_heuristic)
                 logging.info('loss: %s', loss)
                 # logging.info('i_batch: %s', i_batch)
 
@@ -105,19 +112,30 @@ if __name__ == '__main__':
     dataloader = DataLoader(multi_channel_dataset, batch_size=batch_size * 2,
                             shuffle=True, num_workers=num_workers)
     logging.info('calculating exact accuracy...')
-    negative_counts = 0
     exact_accuracy_lst = []
+    avg_heuristic_hat_lst = []
     for i_batch, sample_batched in enumerate(dataloader):
-        theta = net(sample_batched['state'].to(device).float())
-        theta = theta.detach()
+        predictions = net(sample_batched['state'].to(device).float())
+        predictions = predictions.detach().squeeze()
         labels = sample_batched['label'].to(device).float()
-        predictions = theta[:, 1]
         accuracy = predictions <= labels
-        accuracy = accuracy.cpu().numpy()
-        accuracy = accuracy.sum() / accuracy.shape[0]
+        accuracy = accuracy.detach().cpu().numpy()
+        accuracy = accuracy.sum() / float(accuracy.shape[0])
         exact_accuracy_lst.append(accuracy)
-        negative_counts += (predictions < 0.).detach().cpu().numpy().sum()
+
+        predictions[predictions < 0.] = 0.
+        avg_heuristic_hat = predictions.mean().cpu().numpy()
+        avg_heuristic_hat_lst.append(avg_heuristic_hat)
+        avg_heuristic = labels.cpu().numpy().mean()
+        avg_heuristic_hat_lst.append(avg_heuristic_hat)
+        # logging.info('accuracy: %s', accuracy)
+        # logging.info('average predicted heuristic: %s', avg_heuristic_hat)
+        # logging.info('average heuristic: %s', avg_heuristic)
+
     exact_accuracy = np.mean(exact_accuracy_lst)
+    exact_avg_heuristic = np.mean(avg_heuristic_hat_lst)
 
     logging.info('exact accuracy: %s', exact_accuracy)
-    logging.info('negative counts: %s', negative_counts)
+    logging.info('avg predicted heuristic: %s', exact_avg_heuristic)
+
+    # {'num_layers': 2.0, 'num_kernels': 46.0, 'lr': 0.010392954780225002, 'q_level': 0.025473899900400707}
