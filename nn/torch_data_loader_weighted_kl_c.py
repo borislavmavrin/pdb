@@ -19,6 +19,7 @@ class MultiChannelDataset(Dataset):
                 on a sample.
         """
         self.pattern = pattern
+        self.state_size = len(self.pattern)
         label_lst = []
         with open(pdb_file, "rb") as f:
             byte = f.read(1)
@@ -45,8 +46,8 @@ class MultiChannelDataset(Dataset):
         s = unrank.getFeature(idx, self.pattern)
         s_np = np.array(s).astype('float')
         s_np = s_np.reshape((-1, 2)).astype(int)
-        state = np.zeros((7, 4, 4))
-        state[np.arange(7), s_np[:, 0], s_np[:, 1]] = 1.
+        state = np.zeros((self.state_size, 4, 4))
+        state[np.arange(self.state_size), s_np[:, 0], s_np[:, 1]] = 1.
         sample = {'state': state, 'label': probs}
 
         if self.transform:
@@ -56,8 +57,9 @@ class MultiChannelDataset(Dataset):
 
 
 if __name__ == '__main__':
-    data_file = "compDelta1-7.txt"
-    pattern = [1, 2, 3, 4, 5, 6, 7]
+    data_file = "8-15.txt"
+    # pattern = [1, 2, 3, 4, 5, 6, 7]
+    pattern = list(range(8, 16))
     home = os.path.expanduser('~')
     data_path = os.path.join(home, 'pdb_data', data_file)
     multi_channel_dataset = MultiChannelDataset(pdb_file=data_path, pattern=pattern)

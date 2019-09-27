@@ -13,12 +13,12 @@ import logging
 
 class Net(nn.Module):
 
-    def __init__(self, num_kernels, num_layers, num_labels):
+    def __init__(self, num_kernels, num_layers, num_labels, num_channels):
         super(Net, self).__init__()
         self.num_kernels = num_kernels
         self.num_layers = num_layers
         self.num_labels = num_labels
-        self.conv1 = nn.Conv2d(7, self.num_kernels, kernel_size=3, stride=1)
+        self.conv1 = nn.Conv2d(num_channels, self.num_kernels, kernel_size=3, stride=1)
         self.conv2 = nn.Conv2d(self.num_kernels, self.num_kernels, kernel_size=2, stride=1)
         self.linear_lst = nn.ModuleList()
         for l in range(self.num_layers):
@@ -49,16 +49,19 @@ if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
     lr = 0.01
-    num_kernels = 32
-    num_layers = 1
+    num_kernels = 96
+    num_layers = 3
     q_level = 0.025
     num_epochs = 5
+    pattern = list(range(8, 16))
+    max_heuristic = 18
+    num_channels = len(pattern)
 
     device = 'cuda:1'
     # device = 'cpu'
     num_workers = 32
 
-    net = Net(num_kernels, num_layers, 15).to(device).float()
+    net = Net(num_kernels, num_layers, max_heuristic + 1, num_channels).to(device).float()
     softmax = nn.Softmax(dim=1)
 
     num_weights = get_num_weights(net)
@@ -66,8 +69,9 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
-    data_file = "compDelta1-7.txt"
-    pattern = [1, 2, 3, 4, 5, 6, 7]
+    data_file = "8-15.txt"
+    # pattern = [1, 2, 3, 4, 5, 6, 7]
+
     home = os.path.expanduser('~')
     data_path = os.path.join(home, 'pdb_data', data_file)
 
